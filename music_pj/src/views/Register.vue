@@ -61,7 +61,8 @@
     display: flex;
     justify-content: center;
     align-items: center;
-    min-height: 50vh;
+    min-height: 100vh;
+    background-image: url('./img/login_bg.png'); 
     background-size: cover;
     background-position: center;
     background-repeat: no-repeat;
