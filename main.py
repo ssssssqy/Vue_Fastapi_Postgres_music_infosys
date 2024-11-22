@@ -1,5 +1,5 @@
 import jwt
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, Query
 from fastapi.middleware.cors import CORSMiddleware  # 导入 CORS 中间件
 from datetime import datetime, timedelta
 from models import User,Playlist,Song,Artist
@@ -9,6 +9,7 @@ from database import get_session
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
 import hashlib
+from typing import List
 
 # 配置常量
 SECRET_KEY = "adegetrgbb"  
@@ -86,6 +87,18 @@ async def create_user(request: Request, session: AsyncSession = Depends(get_sess
     await session.refresh(new_user)
     return {"success": True, "message": "注册成功！"}
 
+@app.get("/api/artists", response_model=List[dict])
+async def get_artists(search: str = Query(None), session: AsyncSession = Depends(get_session)):
+    if search:
+        # 按名字模糊查询歌手
+        result = await session.execute(select(Artist).where(Artist.name.contains(search)))
+    else:
+        # 查询所有歌手
+        result = await session.execute(select(Artist))
+    
+    artists = result.scalars().all()
+    return [{"id": artist.id, "name": artist.name, "genre": artist.genre} for artist in artists]
+
 
 # # 获取所有用户（管理员功能）
 # @app.get("/users/", response_model=List[User])
@@ -114,12 +127,7 @@ async def delete_playlist(playlist_id: int, user_id: int, session: AsyncSession 
     await session.commit()
     return {"msg": "Playlist deleted"}
 
-# 搜索歌手
-@app.get("/artists/")
-async def search_artists(name: str, session: AsyncSession = Depends(get_session)):
-    result = await session.execute(select(Artist).filter(Artist.name.ilike(f"%{name}%")))
-    artists = result.scalars().all()
-    return artists
+
 
 # 上传歌曲
 @app.post("/songs/")

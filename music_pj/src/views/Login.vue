@@ -61,16 +61,7 @@
         }
       },
 
-      goToRegister() {
-        this.$router.push('/register'); // 使用 Vue Router 进行页面跳转
-      },
-
     },
-    computed:{
-	    key(){
-	        return this.$route.path + Math.random();
-	    }
-	  }
 
   };
 
