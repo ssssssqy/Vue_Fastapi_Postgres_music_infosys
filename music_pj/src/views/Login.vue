@@ -45,12 +45,17 @@
     methods: {
       async submitForm() {
         try {
-          const { success, access_token, message } = await login(this.username, this.password);
-          
+          const { success, access_token, message, admin } = await login(this.username, this.password);
+          console.log( success, access_token, message, admin );
           if (success) {
             console.log('登录成功:', message);
             localStorage.setItem('access_token', access_token);
-            this.$router.push('/home');
+            if(admin){
+              this.$router.push('/homeadmin');
+            }
+            else{
+              this.$router.push('/home');
+            }
           } else {
             this.errorMessage = message;
             console.log('登录失败:', message);

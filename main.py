@@ -77,6 +77,13 @@ class UserRequest(BaseModel):
     username: str
     password: str
 
+class UserResponse(BaseModel):
+    id: int
+    username: str
+    class Config:
+        orm_mode = True
+        from_attributes = True
+
 class SongResponse(BaseModel):
     id: int
     title: str
@@ -90,6 +97,21 @@ class PlaylistResponse(BaseModel):
     id: int
     name: str
     owner: Optional[str]  # 歌单的所有者用户名，可能为空
+
+    class Config:
+        orm_mode = True
+
+class ArtistRequest(BaseModel):
+    name: str
+    genre: Optional[str] = None
+
+    class Config:
+        orm_mode = True
+
+class SongRequest(BaseModel):
+    title: str
+    genre: Optional[str] = None
+    artist_id: Optional[int] = None  # 关联的歌手 ID
 
     class Config:
         orm_mode = True
@@ -125,7 +147,7 @@ async def user_login(request: UserRequest, session: AsyncSession = Depends(get_s
 
     # 生成 JWT token
     access_token = create_jwt(user.id)
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {"access_token": access_token, "token_type": "bearer","admin":user.is_admin}
 
 # 创建用户
 @app.post("/register/")
@@ -249,7 +271,7 @@ async def delete_playlist(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Playlist not found"
         )
-    if playlist.owner_id != current_user.id:
+    if playlist.owner_id != current_user.id | current_user.is_admin == False:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied"
         )
@@ -258,66 +280,249 @@ async def delete_playlist(
     await session.commit()
     return {"success": True, "message": "Playlist deleted"}
 
-# 管理员：删除歌单
-@app.delete("/playlists/{playlist_id}/admin/")
-async def delete_playlist_admin(playlist_id: int, user_id: int, session: AsyncSession = Depends(get_session)):
-    await is_admin(user_id, session)
-    result = await session.execute(select(Playlist).filter(Playlist.id == playlist_id))
-    playlist = result.scalars().first()
-    if not playlist:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Playlist not found")
-    await session.delete(playlist)
-    await session.commit()
-    return {"msg": "Playlist deleted by admin"}
 
-# 管理员：修改歌单
-@app.put("/playlists/{playlist_id}/admin/")
-async def update_playlist_admin(playlist_id: int, name: str, user_id: int, session: AsyncSession = Depends(get_session)):
-    await is_admin(user_id, session)
-    result = await session.execute(select(Playlist).filter(Playlist.id == playlist_id))
-    playlist = result.scalars().first()
-    if not playlist:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Playlist not found")
-    playlist.name = name
-    await session.commit()
-    return playlist
 
-# 管理员：增删改歌手信息
-@app.post("/artists/admin/")
-async def create_artist(name: str, genre: str, user_id: int, session: AsyncSession = Depends(get_session)):
-    await is_admin(user_id, session)
-    new_artist = Artist(name=name, genre=genre)
+@app.get("/admin/users", response_model=List[UserResponse])
+async def get_users(
+    query: str = "",
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    # 验证是否为管理员
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="您没有权限访问此资源"
+        )
+    # 查询用户名包含 query 的用户
+    stmt = select(User).where(User.username.contains(query))
+    result = await session.execute(stmt)
+    users = result.scalars().all()
+    return [UserResponse.from_orm(user) for user in users]
+
+
+@app.delete("/admin/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_user(
+    user_id: int,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    # 验证是否为管理员
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="您没有权限访问此资源"
+        )
+    # 查询并删除用户
+    stmt = select(User).where(User.id == user_id)
+    result = await session.execute(stmt)
+    user = result.scalar_one_or_none()
+    if user.is_admin:
+         raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="您不能删除Admin管理员账号！"
+        )
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+    await session.delete(user)
+    await session.commit()
+
+@app.post("/admin/artists", response_model=dict)
+async def add_artist(
+    artist_request: ArtistRequest,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    # 验证是否为管理员
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="您没有权限添加歌手"
+        )
+    # 创建新歌手
+    new_artist = Artist(name=artist_request.name, genre=artist_request.genre)
     session.add(new_artist)
     await session.commit()
     await session.refresh(new_artist)
-    return new_artist
+    return {"id": new_artist.id, "name": new_artist.name, "genre": new_artist.genre}
 
-@app.delete("/artists/{artist_id}/admin/")
-async def delete_artist(artist_id: int, user_id: int, session: AsyncSession = Depends(get_session)):
-    await is_admin(user_id, session)
-    result = await session.execute(select(Artist).filter(Artist.id == artist_id))
-    artist = result.scalars().first()
+
+# 更新歌手信息
+@app.put("/admin/artists/{artist_id}", response_model=dict)
+async def update_artist(
+    artist_id: int,
+    artist_request: ArtistRequest,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    # 验证是否为管理员
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="您没有权限更新歌手信息"
+        )
+    # 查找歌手
+    result = await session.execute(select(Artist).where(Artist.id == artist_id))
+    artist = result.scalar_one_or_none()
     if not artist:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artist not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="歌手不存在")
+    # 更新歌手信息
+    artist.name = artist_request.name
+    artist.genre = artist_request.genre
+    await session.commit()
+    await session.refresh(artist)
+    return {"id": artist.id, "name": artist.name, "genre": artist.genre}
+
+
+# 删除歌手
+@app.delete("/admin/artists/{artist_id}")
+async def delete_artist(
+    artist_id: int,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    # 验证是否为管理员
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="您没有权限删除歌手"
+        )
+    # 查找并删除歌手
+    result = await session.execute(select(Artist).where(Artist.id == artist_id))
+    artist = result.scalar_one_or_none()
+    if not artist:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="歌手不存在")
     await session.delete(artist)
     await session.commit()
-    return {"msg": "Artist deleted by admin"}
+    return {"success": True, "message": "歌手已删除"}
 
-@app.put("/artists/{artist_id}/admin/")
-async def update_artist(artist_id: int, name: str, genre: str, user_id: int, session: AsyncSession = Depends(get_session)):
-    await is_admin(user_id, session)
-    result = await session.execute(select(Artist).filter(Artist.id == artist_id))
-    artist = result.scalars().first()
-    if not artist:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artist not found")
-    artist.name = name
-    artist.genre = genre
+
+# 添加新歌曲
+@app.post("/admin/songs", response_model=SongResponse)
+async def add_song(
+    song_request: SongRequest,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    # 验证是否为管理员
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="您没有权限添加歌曲"
+        )
+
+    # 检查关联的歌手是否存在
+    artist = None
+    if song_request.artist_id:
+        result = await session.execute(select(Artist).where(Artist.id == song_request.artist_id))
+        artist = result.scalar_one_or_none()
+        if not artist:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="歌手不存在")
+
+    # 添加歌曲到数据库
+    new_song = Song(title=song_request.title, genre=song_request.genre, artist_id=song_request.artist_id)
+    session.add(new_song)
     await session.commit()
-    return artist
+    await session.refresh(new_song)
 
-# # 获取所有用户（管理员功能）
-# @app.get("/users/", response_model=List[User])
-# async def get_users(session: AsyncSession = Depends(get_session)):
-#     result = await session.execute(select(User))
-#     users = result.scalars().all()
-#     return users
+    return SongResponse(id=new_song.id, title=new_song.title, genre=new_song.genre, artist=artist.name if artist else None)
+
+
+# 更新歌曲信息
+@app.put("/admin/songs/{song_id}", response_model=SongResponse)
+async def update_song(
+    song_id: int,
+    song_request: SongRequest,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    # 验证是否为管理员
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="您没有权限更新歌曲"
+        )
+
+    # 查找歌曲
+    result = await session.execute(select(Song).where(Song.id == song_id))
+    song = result.scalar_one_or_none()
+    if not song:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="歌曲不存在")
+
+    # 更新歌曲信息
+    song.title = song_request.title
+    song.genre = song_request.genre
+    song.artist_id = song_request.artist_id
+
+    await session.commit()
+    await session.refresh(song)
+
+    return SongResponse(
+        id=song.id, title=song.title, genre=song.genre, artist=song.artist.name if song.artist else None
+    )
+
+
+# 删除歌曲
+@app.delete("/admin/songs/{song_id}")
+async def delete_song(
+    song_id: int,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    # 验证是否为管理员
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="您没有权限删除歌曲"
+        )
+
+    # 查找歌曲
+    result = await session.execute(select(Song).where(Song.id == song_id))
+    song = result.scalar_one_or_none()
+    if not song:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="歌曲不存在")
+
+    # 删除歌曲
+    await session.delete(song)
+    await session.commit()
+    return {"success": True, "message": "歌曲已删除"}
+
+
+# 获取歌曲详情
+@app.get("/api/songs/{song_id}", response_model=SongResponse)
+async def get_song_details(
+    song_id: int,
+    session: AsyncSession = Depends(get_session),
+):
+    # 查找歌曲
+    result = await session.execute(select(Song).where(Song.id == song_id).options(selectinload(Song.artist)))
+    song = result.scalar_one_or_none()
+    if not song:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="歌曲不存在")
+
+    return SongResponse(
+        id=song.id, title=song.title, genre=song.genre, artist=song.artist.name if song.artist else None
+    )
+
+
+# 将歌曲添加到歌单
+@app.post("/api/playlists/{playlist_id}/songs")
+async def add_song_to_playlist(
+    playlist_id: int,
+    song_id: int = Body(...),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    # 查找歌单
+    result = await session.execute(select(Playlist).where(Playlist.id == playlist_id))
+    playlist = result.scalar_one_or_none()
+    if not playlist:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="歌单不存在")
+
+    # 检查是否为歌单所有者或管理员
+    if playlist.owner_id != current_user.id and not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="您没有权限操作此歌单"
+        )
+
+    # 查找歌曲
+    result = await session.execute(select(Song).where(Song.id == song_id))
+    song = result.scalar_one_or_none()
+    if not song:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="歌曲不存在")
+
+    # 将歌曲添加到歌单
+    playlist.songs.append(song)
+    await session.commit()
+    return {"success": True, "message": f"歌曲 {song.title} 已添加到歌单 {playlist.name}"}

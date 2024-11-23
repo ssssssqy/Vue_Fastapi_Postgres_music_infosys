@@ -13,7 +13,8 @@ export const login = async (username, password) => {
       return {
         success: true,
         access_token: response.data.access_token,  // 返回 token
-        message: '登录成功'  // 登录成功信息
+        message: '登录成功',  // 登录成功信息
+        admin: response.data.admin
       };
     } else {
       return {
@@ -41,3 +42,18 @@ export const register = async (username, password) => {
       return { success: false, message: '注册请求失败，请稍后再试。' };
     }
   };
+
+
+  export async function fetchUsers(query, token) {
+    const response = await axios.get(`${API_BASE_URL}/admin/users?query=${query}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return response.data;
+  }
+  
+  export async function deleteUser(userId, token) {
+    await axios.delete(`${API_BASE_URL}/admin/users/${userId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  }
+  
