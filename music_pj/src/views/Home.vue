@@ -1,40 +1,31 @@
 <template>
     <div class="home-container">
-      <!-- 左栏：歌单 -->
-      <div class="playlist-section">
+        <div class="playlist-section">
         <h2>歌单</h2>
-        <input 
-          type="text" 
-          placeholder="搜索歌单..." 
-          v-model="playlistSearchQuery" 
-          @input="searchPlaylists" 
+        <!-- 搜索所有用户创建的歌单 -->
+        <input
+            type="text"
+            placeholder="搜索歌单..."
+            v-model="playlistSearchQuery"
+            @input="searchPlaylists"
         />
+        <ul>
+            <li v-for="playlist in filteredPlaylists" :key="playlist.id">
+            <strong>{{ playlist.name }}</strong> by {{ playlist.owner }}
+            </li>
+        </ul>
+
+        <!-- 展示当前用户的歌单 -->
+        <h3>我的歌单</h3>
         <button @click="createPlaylist">创建歌单</button>
         <ul>
-          <li v-for="(playlist, index) in filteredPlaylists" :key="index">
+            <li v-for="playlist in userPlaylists" :key="playlist.id">
             {{ playlist.name }}
-            <button @click="deletePlaylist(index)">删除</button>
-          </li>
+            <button @click="deletePlaylist(playlist.id)">删除</button>
+            </li>
         </ul>
-      </div>
-  
-      <!-- 中栏：歌手
-      <div class="artist-section">
-        <h2>歌手</h2>
-        <input 
-          type="text" 
-          placeholder="搜索歌手..." 
-          v-model="artistSearchQuery" 
-          @input="searchArtists" 
-        />
-        <ul>
-          <li v-for="(artist, index) in filteredArtists" :key="index">
-            {{ artist.name }}
-            <button @click="viewArtist(index)">查看</button>
-          </li>
-        </ul>
-      </div>
-   -->
+        </div>
+
 
     <div class="artist-section">
     <h2>歌手</h2>
@@ -58,54 +49,67 @@
 
 
       <!-- 右栏：歌曲 -->
-      <div class="song-section">
-        <h2>歌曲</h2>
-        <input 
-          type="text" 
-          placeholder="搜索歌曲..." 
-          v-model="songSearchQuery" 
-          @input="searchSongs" 
-        />
-        <button @click="uploadSong">上传歌曲</button>
-        <ul>
-          <li v-for="(song, index) in filteredSongs" :key="index">
-            {{ song.title }}
-            <button @click="deleteSong(index)">删除</button>
-          </li>
-        </ul>
-      </div>
+      <!-- 歌曲栏 -->
+    <div class="song-section">
+      <h2>歌曲</h2>
+      <input 
+        type="text" 
+        placeholder="搜索歌曲..." 
+        v-model="songSearchQuery" 
+        @input="fetchSongs" 
+      />
+      <ul>
+        <li v-for="(song, index) in songs" :key="index">
+          <strong>{{ song.title }}</strong> - {{ song.genre }}
+          <span v-if="song.artist"> by {{ song.artist }}</span>
+        </li>
+      </ul>
     </div>
-  </template>
+  </div>
+</template>
+
   
   <script>
   import { fetchArtists } from "@/services/artist_service.js"; // 引入服务
+  import { fetchSongs } from "@/services/song_service";
+  import {
+  getPlaylists,
+  getUserPlaylists,
+  createPlaylist,
+  deletePlaylist,
+} from "@/services/playlist_service";
 
   export default {
     data() {
       return {
-        playlists: [{ name: "我的歌单1" }, { name: "流行音乐" }],
+        playlists: [],
         artists: [],
-        songs: [{ title: "青花瓷" }, { title: "泡沫" }],
+        songs: [],
         playlistSearchQuery: "",
         artistSearchQuery: "",
         songSearchQuery: "",
+        playlistSearchQuery: "",
+        userPlaylists: [],
+        token: "", // 当前用户的 JWT token
       };
     },
     computed: {
+      // 根据搜索框内容过滤展示的歌单
       filteredPlaylists() {
         return this.playlists.filter((playlist) =>
           playlist.name.includes(this.playlistSearchQuery)
         );
       },
-    // 根据搜索框内容过滤展示的歌手
+      // 根据搜索框内容过滤展示的歌手
       displayedArtists() {
         if (!this.artistSearchQuery) {
-            return this.artists; // 未搜索时显示所有歌手
+          return this.artists; // 未搜索时显示所有歌手
         }
         return this.artists.filter((artist) =>
-            artist.name.includes(this.artistSearchQuery)
+          artist.name.includes(this.artistSearchQuery)
         );
-    },
+      },
+      // 根据搜索框内容过滤展示的歌曲
       filteredSongs() {
         return this.songs.filter((song) =>
           song.title.includes(this.songSearchQuery)
@@ -113,58 +117,75 @@
       },
     },
     methods: {
-        
-      createPlaylist() {
-        const name = prompt("请输入新歌单名称：");
-        if (name) {
-          this.playlists.push({ name });
-        }
-      },
-      deletePlaylist(index) {
-        this.playlists.splice(index, 1);
-      },
-      searchPlaylists() {
-        console.log("搜索歌单：", this.playlistSearchQuery);
-      },
-},
-methods: {
+
+      // 搜索歌手
       async searchArtists() {
         try {
-            this.artists = await fetchArtists(this.artistSearchQuery); // 使用服务方法
+          this.artists = await fetchArtists(this.artistSearchQuery); // 使用服务方法
         } catch (error) {
-            console.error("搜索歌手失败:", error);
+          console.error("搜索歌手失败:", error);
         }
       },
-      
+      // 获取所有歌手
       async fetchArtists() {
         try {
-            this.artists = await fetchArtists(); // 使用服务方法
+          this.artists = await fetchArtists(); // 使用服务方法
         } catch (error) {
-            console.error("加载歌手失败:", error);
+          console.error("加载歌手失败:", error);
+        }
+      },
+      // 获取歌曲
+      async fetchSongs() {
+        try {
+          const response = await fetchSongs(this.songSearchQuery);
+          this.songs = response;
+        } catch (error) {
+          console.error("获取歌曲失败：", error);
         }
       },
 
-      mounted() {
-        this.fetchArtists(); // 页面加载时获取所有歌手
+      async searchPlaylists() {
+        this.playlists = await getPlaylists(this.playlistSearchQuery);
       },
-      viewArtist(index) {
-        alert(`查看歌手详情：${this.artists[index].name}`);
+
+      async loadUserPlaylists() {
+        const token = localStorage.getItem("access_token"); // 从 localStorage 获取 token
+        this.userPlaylists = await getUserPlaylists(token);
       },
-      searchSongs() {
-        console.log("搜索歌曲：", this.songSearchQuery);
-      },
-      uploadSong() {
-        const title = prompt("请输入歌曲名称：");
-        if (title) {
-          this.songs.push({ title });
+
+      async createPlaylist() {
+        const name = prompt("请输入新歌单名称：");
+        if (name) {
+            const token = localStorage.getItem("access_token"); // 从 localStorage 获取 token
+            console.log("Token:", token); // 打印 token 以便调试
+                if (token) {
+                    await createPlaylist(name, token);
+                    await this.loadUserPlaylists();
+                    await this.searchPlaylists();
+                } else {
+                    console.error("No token found!");
+                }
         }
       },
-      deleteSong(index) {
-        this.songs.splice(index, 1);
+
+
+      async deletePlaylist(playlistId) {
+        const token = localStorage.getItem("access_token"); 
+        await deletePlaylist(playlistId, token);
+        await this.loadUserPlaylists();
+        await this.searchPlaylists();
       },
     },
+    mounted() {
+      // 页面加载时获取数据
+      this.fetchArtists(); // 页面加载时获取所有歌手
+      this.fetchSongs(); // 页面加载时获取前10首歌曲
+      this.searchPlaylists();
+      this.loadUserPlaylists();
+    },
   };
-  </script>
+</script>
+
   
   <style scoped>
   /* 页面背景及居中布局 */

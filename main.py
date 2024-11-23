@@ -1,15 +1,16 @@
 import jwt
-from fastapi import FastAPI, Depends, HTTPException, status, Query
+from fastapi import FastAPI, Depends, HTTPException, status, Query, Body, Request
 from fastapi.middleware.cors import CORSMiddleware  # 导入 CORS 中间件
 from datetime import datetime, timedelta
 from models import User,Playlist,Song,Artist
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from sqlalchemy.future import select
 from database import get_session
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
 import hashlib
-from typing import List
+from typing import List, Optional
 
 # 配置常量
 SECRET_KEY = "adegetrgbb"  
@@ -34,14 +35,64 @@ app.add_middleware(
 # 创建 JWT Token 的函数
 def create_jwt(user_id: int) -> str:
     expiration = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    payload = {"sub": user_id, "exp": expiration}
+    payload = {"sub": str(user_id), "exp": expiration}
     token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+    print(f"Generated Token: {token}")
     return token
 
+async def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    session: AsyncSession = Depends(get_session),
+):
+    try:
+        print(f"Received token: {token}")
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        print(f"Decoded payload: {payload}")  # Debugging
+        user_id = payload.get("sub")
+        if user_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token1"
+            )
+        result = await session.execute(select(User).where(User.id == int(user_id)))
+        user = result.scalars().first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+            )
+        print(user.username)
+        return user
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired"
+        )
+    except jwt.InvalidTokenError as e:
+        print(f"Token error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token2"
+        )
+
+
 # Pydantic 模型，用于请求体验证
-class Request(BaseModel):
+class UserRequest(BaseModel):
     username: str
     password: str
+
+class SongResponse(BaseModel):
+    id: int
+    title: str
+    genre: Optional[str]
+    artist: Optional[str]  # 歌手名称，可能为空
+
+    class Config:
+        orm_mode = True
+
+class PlaylistResponse(BaseModel):
+    id: int
+    name: str
+    owner: Optional[str]  # 歌单的所有者用户名，可能为空
+
+    class Config:
+        orm_mode = True
 
 # 辅助函数：检查用户密码
 async def verify_password(db_session: AsyncSession, username: str, password: str) -> bool:
@@ -61,7 +112,7 @@ async def is_admin(user_id: int, session: AsyncSession):
 
 # 用户登录端点：验证用户并生成 JWT
 @app.post("/login/")
-async def user_login(request: Request, session: AsyncSession = Depends(get_session)):
+async def user_login(request: UserRequest, session: AsyncSession = Depends(get_session)):
     # 验证用户名和密码
     if not await verify_password(session, request.username, request.password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password")
@@ -78,7 +129,7 @@ async def user_login(request: Request, session: AsyncSession = Depends(get_sessi
 
 # 创建用户
 @app.post("/register/")
-async def create_user(request: Request, session: AsyncSession = Depends(get_session)):
+async def create_user(request: UserRequest, session: AsyncSession = Depends(get_session)):
     # 密码加密（使用 hashlib 只是示范，实际使用更安全的方式，如 bcrypt）
     hashed_password = hashlib.sha256(request.password.encode()).hexdigest()
     new_user = User(username=request.username, hashed_password=hashed_password)
@@ -99,62 +150,113 @@ async def get_artists(search: str = Query(None), session: AsyncSession = Depends
     artists = result.scalars().all()
     return [{"id": artist.id, "name": artist.name, "genre": artist.genre} for artist in artists]
 
+@app.get("/api/songs", response_model=List[SongResponse])
+async def get_songs(
+    search: str = Query(None), 
+    limit: int = Query(10), 
+    session: AsyncSession = Depends(get_session)
+):
 
-# # 获取所有用户（管理员功能）
-# @app.get("/users/", response_model=List[User])
-# async def get_users(session: AsyncSession = Depends(get_session)):
-#     result = await session.execute(select(User))
-#     users = result.scalars().all()
-#     return users
+    query = select(Song).options(selectinload(Song.artist)).limit(limit)
+    if search:
+        query = query.where(Song.title.contains(search))
 
-# 普通用户：创建歌单
-@app.post("/playlists/")
-async def create_playlist(name: str, user_id: int, session: AsyncSession = Depends(get_session)):
-    new_playlist = Playlist(name=name, owner_id=user_id)
+    result = await session.execute(query)
+    songs = result.scalars().all()
+
+    
+    # 构造响应数据
+    return [
+        SongResponse(
+            id=song.id,
+            title=song.title,
+            genre=song.genre,
+            artist=song.artist.name if song.artist else None
+        )
+        for song in songs
+    ]
+
+
+# 获取所有用户创建的歌单或通过名称搜索歌单
+@app.get("/api/playlists", response_model=List[PlaylistResponse])
+async def get_playlists(
+    search: str = Query(None),
+    limit: int = Query(10),
+    session: AsyncSession = Depends(get_session),
+):
+    query = select(Playlist).options(selectinload(Playlist.owner)).limit(limit)
+    if search:
+        query = query.where(Playlist.name.contains(search))
+    result = await session.execute(query)
+    playlists = result.scalars().all()
+    return [
+        PlaylistResponse(
+            id=playlist.id,
+            name=playlist.name,
+            owner=playlist.owner.username if playlist.owner else None,
+        )
+        for playlist in playlists
+    ]
+
+
+# 获取当前用户的歌单
+@app.get("/api/playlists/my", response_model=List[PlaylistResponse])
+async def get_user_playlists(
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    result = await session.execute(
+        select(Playlist).where(Playlist.owner_id == current_user.id)
+    )
+    playlists = result.scalars().all()
+    return [
+        PlaylistResponse(id=playlist.id, name=playlist.name, owner=current_user.username)
+        for playlist in playlists
+    ]
+
+
+# 创建歌单
+@app.post("/api/playlists", response_model=PlaylistResponse)
+async def create_playlist(
+    request: Request,
+    name: str = Body(...),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    raw_body = await request.body()
+    print(f"Raw body: {raw_body}")  # 打印原始请求体
+    print(f"Received name: {name}")  # 打印 name 查看
+    new_playlist = Playlist(name=name, owner_id=current_user.id)
     session.add(new_playlist)
     await session.commit()
     await session.refresh(new_playlist)
-    return new_playlist
+    return PlaylistResponse(id=new_playlist.id, name=new_playlist.name, owner=current_user.username)
 
-# 普通用户：删除自己的歌单
-@app.delete("/playlists/{playlist_id}/")
-async def delete_playlist(playlist_id: int, user_id: int, session: AsyncSession = Depends(get_session)):
-    result = await session.execute(select(Playlist).filter(Playlist.id == playlist_id, Playlist.owner_id == user_id))
+
+# 删除歌单
+@app.delete("/api/playlists/{playlist_id}")
+async def delete_playlist(
+    playlist_id: int,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    result = await session.execute(
+        select(Playlist).where(Playlist.id == playlist_id)
+    )
     playlist = result.scalars().first()
+
     if not playlist:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Playlist not found or you do not own this playlist")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Playlist not found"
+        )
+    if playlist.owner_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied"
+        )
+
     await session.delete(playlist)
     await session.commit()
-    return {"msg": "Playlist deleted"}
-
-
-
-# 上传歌曲
-@app.post("/songs/")
-async def upload_song(title: str, genre: str, artist_id: int, user_id: int, session: AsyncSession = Depends(get_session)):
-    new_song = Song(title=title, genre=genre, artist_id=artist_id)
-    session.add(new_song)
-    await session.commit()
-    await session.refresh(new_song)
-    return new_song
-
-# 查找自己上传的歌曲
-@app.get("/songs/my_songs/")
-async def get_my_songs(user_id: int, session: AsyncSession = Depends(get_session)):
-    result = await session.execute(select(Song).filter(Song.uploaded_by == user_id))  # 假设 Song 表有 uploaded_by 字段表示上传者
-    songs = result.scalars().all()
-    return songs
-
-# 删除自己上传的歌曲
-@app.delete("/songs/{song_id}/")
-async def delete_song(song_id: int, user_id: int, session: AsyncSession = Depends(get_session)):
-    result = await session.execute(select(Song).filter(Song.id == song_id, Song.uploaded_by == user_id))  # 假设 Song 表有 uploaded_by 字段
-    song = result.scalars().first()
-    if not song:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Song not found or you do not own this song")
-    await session.delete(song)
-    await session.commit()
-    return {"msg": "Song deleted"}
+    return {"success": True, "message": "Playlist deleted"}
 
 # 管理员：删除歌单
 @app.delete("/playlists/{playlist_id}/admin/")
@@ -212,3 +314,10 @@ async def update_artist(artist_id: int, name: str, genre: str, user_id: int, ses
     artist.genre = genre
     await session.commit()
     return artist
+
+# # 获取所有用户（管理员功能）
+# @app.get("/users/", response_model=List[User])
+# async def get_users(session: AsyncSession = Depends(get_session)):
+#     result = await session.execute(select(User))
+#     users = result.scalars().all()
+#     return users
