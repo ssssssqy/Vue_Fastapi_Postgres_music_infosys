@@ -495,34 +495,50 @@ async def get_song_details(
         id=song.id, title=song.title, genre=song.genre, artist=song.artist.name if song.artist else None
     )
 
-
-# 将歌曲添加到歌单
-@app.post("/api/playlists/{playlist_id}/songs")
+@app.post("/api/playlists/{playlist_id}/add_song", status_code=201)
 async def add_song_to_playlist(
     playlist_id: int,
-    song_id: int = Body(...),
+    song_data: dict = Body(...),
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    # 查找歌单
-    result = await session.execute(select(Playlist).where(Playlist.id == playlist_id))
-    playlist = result.scalar_one_or_none()
-    if not playlist:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="歌单不存在")
-
-    # 检查是否为歌单所有者或管理员
-    if playlist.owner_id != current_user.id and not current_user.is_admin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="您没有权限操作此歌单"
+    """
+    向歌单添加歌曲
+    """
+    try:
+        # 检查歌单是否属于当前用户
+        result = await session.execute(
+            select(Playlist)
+            .options(selectinload(Playlist.songs))
+            .where(Playlist.id == playlist_id, Playlist.owner_id == current_user.id)
         )
+        playlist = result.scalars().first()
+        if not playlist:
+            raise HTTPException(
+                status_code=404, detail="Playlist not found or access denied"
+            )
 
-    # 查找歌曲
-    result = await session.execute(select(Song).where(Song.id == song_id))
-    song = result.scalar_one_or_none()
-    if not song:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="歌曲不存在")
+        # 检查或创建艺术家
+        artist_name = song_data.get("artist_name")
+        result = await session.execute(select(Artist).where(Artist.name == artist_name))
+        artist = result.scalars().first()
+        if not artist:
+            artist = Artist(name=artist_name)
+            session.add(artist)
+            await session.flush()  # 确保新艺术家 ID 可用
 
-    # 将歌曲添加到歌单
-    playlist.songs.append(song)
-    await session.commit()
-    return {"success": True, "message": f"歌曲 {song.title} 已添加到歌单 {playlist.name}"}
+        # 创建歌曲
+        song = Song(
+            title=song_data["title"],
+            artist_id=artist.id,
+        )
+        session.add(song)
+        await session.flush()
+
+        # 添加歌曲到歌单
+        playlist.songs.append(song)
+        await session.commit()
+        return {"message": "Song added successfully"}
+    except Exception as e:
+        await session.rollback()
+        raise HTTPException(status_code=500, detail=str(e))

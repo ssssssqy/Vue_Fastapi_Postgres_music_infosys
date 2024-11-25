@@ -45,3 +45,22 @@ export async function deletePlaylist(playlistId, token) {
     headers: { Authorization: `Bearer ${token}` },
   });
 }
+
+
+// 新增：添加歌曲到歌单
+export async function addSongToPlaylist(playlistId, songTitle, artistName, token) {
+  const url = `${API_BASE_URL}/${playlistId}/add_song`;
+  const response = await axios.post(
+    url,
+    {
+      title: songTitle,
+      artist_name: artistName,
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    }
+  );
+  return response.data;
+}

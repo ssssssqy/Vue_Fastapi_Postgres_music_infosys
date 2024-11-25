@@ -22,9 +22,35 @@
             <li v-for="playlist in userPlaylists" :key="playlist.id">
             {{ playlist.name }}
             <button @click="deletePlaylist(playlist.id)">删除</button>
+            <!-- 新增：添加歌曲按钮 -->
+            <button @click="showAddSongForm(playlist.id)">添加歌曲</button>
             </li>
         </ul>
-        </div>
+        <!-- 添加歌曲表单 -->
+      <div v-if="showForm">
+        <h4>向歌单 {{ currentPlaylistName }} 添加歌曲</h4>
+        <form @submit.prevent="submitAddSong">
+          <label for="song-title">歌曲名:</label>
+          <input
+            id="song-title"
+            type="text"
+            v-model="newSong.title"
+            placeholder="输入歌曲名称"
+            required
+          />
+          <label for="artist-name">创作者:</label>
+          <input
+            id="artist-name"
+            type="text"
+            v-model="newSong.artist"
+            placeholder="输入创作者名称"
+            required
+          />
+          <button type="submit">提交</button>
+          <button type="button" @click="cancelAddSong">取消</button>
+        </form>
+      </div>
+      </div>
 
 
     <div class="artist-section">
@@ -77,6 +103,7 @@
   getUserPlaylists,
   createPlaylist,
   deletePlaylist,
+  addSongToPlaylist, // 新增服务方法
 } from "@/services/playlist_service";
 
   export default {
@@ -91,6 +118,13 @@
         playlistSearchQuery: "",
         userPlaylists: [],
         token: "", // 当前用户的 JWT token
+        showForm: false, // 控制表单显示
+        currentPlaylistId: null, // 当前操作的歌单 ID
+        currentPlaylistName: "", // 当前操作的歌单名称
+        newSong: {
+          title: "",
+          artist: "",
+        },
       };
     },
     computed: {
@@ -168,13 +202,40 @@
         }
       },
 
-
       async deletePlaylist(playlistId) {
         const token = localStorage.getItem("access_token"); 
         await deletePlaylist(playlistId, token);
         await this.loadUserPlaylists();
         await this.searchPlaylists();
       },
+
+      showAddSongForm(playlistId) {
+      const playlist = this.userPlaylists.find((p) => p.id === playlistId);
+      this.currentPlaylistId = playlistId;
+      this.currentPlaylistName = playlist.name;
+      this.showForm = true;
+    },
+      async submitAddSong() {
+        try {
+          const token = localStorage.getItem("access_token");
+          await addSongToPlaylist(
+            this.currentPlaylistId,
+            this.newSong.title,
+            this.newSong.artist,
+            token
+          );
+          alert(`歌曲 "${this.newSong.title}" 添加成功！`);
+          this.cancelAddSong();
+        } catch (error) {
+          console.error("添加歌曲失败：", error);
+          alert("添加歌曲失败，请重试！");
+        }
+      },
+      cancelAddSong() {
+        this.showForm = false;
+        this.newSong = { title: "", artist: "" };
+      },
+
     },
     mounted() {
       // 页面加载时获取数据
