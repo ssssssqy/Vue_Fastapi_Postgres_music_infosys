@@ -97,6 +97,7 @@ class PlaylistResponse(BaseModel):
     id: int
     name: str
     owner: Optional[str]  # 歌单的所有者用户名，可能为空
+    songs: List
 
     class Config:
         orm_mode = True
@@ -131,6 +132,8 @@ async def is_admin(user_id: int, session: AsyncSession):
     user = result.scalars().first()
     if not user or not user.is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to perform this action")
+    
+
 
 # 用户登录端点：验证用户并生成 JWT
 @app.post("/login/")
@@ -206,7 +209,7 @@ async def get_playlists(
     limit: int = Query(10),
     session: AsyncSession = Depends(get_session),
 ):
-    query = select(Playlist).options(selectinload(Playlist.owner)).limit(limit)
+    query = select(Playlist).options(selectinload(Playlist.owner),selectinload(Playlist.songs)).limit(limit)
     if search:
         query = query.where(Playlist.name.contains(search))
     result = await session.execute(query)
@@ -216,6 +219,15 @@ async def get_playlists(
             id=playlist.id,
             name=playlist.name,
             owner=playlist.owner.username if playlist.owner else None,
+            songs=[
+                {
+                    "id": song.id,
+                    "title": song.title,
+                    "genre":song.genre,
+                    #"artist": song.artist.name,  # 假设 Song 模型有 `artist` 外键
+                }
+                for song in playlist.songs
+            ] if playlist.songs else []
         )
         for playlist in playlists
     ]
@@ -228,11 +240,24 @@ async def get_user_playlists(
     session: AsyncSession = Depends(get_session),
 ):
     result = await session.execute(
-        select(Playlist).where(Playlist.owner_id == current_user.id)
+        select(Playlist).options(selectinload(Playlist.songs)).where(Playlist.owner_id == current_user.id)
     )
     playlists = result.scalars().all()
     return [
-        PlaylistResponse(id=playlist.id, name=playlist.name, owner=current_user.username)
+        PlaylistResponse(
+            id=playlist.id, 
+            name=playlist.name, 
+            owner=current_user.username,
+            songs=[
+                {
+                    "id": song.id,
+                    "title": song.title,
+                    "genre":song.genre,
+                    #"artist": song.artist.name,  # 假设 Song 模型有 `artist` 外键
+                }
+                for song in playlist.songs
+            ] if playlist.songs else []
+            )
         for playlist in playlists
     ]
 
@@ -252,7 +277,7 @@ async def create_playlist(
     session.add(new_playlist)
     await session.commit()
     await session.refresh(new_playlist)
-    return PlaylistResponse(id=new_playlist.id, name=new_playlist.name, owner=current_user.username)
+    return PlaylistResponse(id=new_playlist.id, name=new_playlist.name, owner=current_user.username,songs=[])
 
 
 # 删除歌单
@@ -495,50 +520,71 @@ async def get_song_details(
         id=song.id, title=song.title, genre=song.genre, artist=song.artist.name if song.artist else None
     )
 
-@app.post("/api/playlists/{playlist_id}/add_song", status_code=201)
+
+# 添加歌曲到歌单
+@app.post("/api/playlists/{playlist_id}/add_song")
 async def add_song_to_playlist(
     playlist_id: int,
     song_data: dict = Body(...),
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    """
-    向歌单添加歌曲
-    """
-    try:
-        # 检查歌单是否属于当前用户
-        result = await session.execute(
-            select(Playlist)
-            .options(selectinload(Playlist.songs))
-            .where(Playlist.id == playlist_id, Playlist.owner_id == current_user.id)
-        )
-        playlist = result.scalars().first()
-        if not playlist:
-            raise HTTPException(
-                status_code=404, detail="Playlist not found or access denied"
-            )
+    # 查找歌单
+    result = await session.execute(select(Playlist).options(selectinload(Playlist.songs)).where(Playlist.id == playlist_id))
+    playlist = result.scalars().first()
+    if not playlist:
+        raise HTTPException(status_code=404, detail="歌单未找到")
 
-        # 检查或创建艺术家
-        artist_name = song_data.get("artist_name")
-        result = await session.execute(select(Artist).where(Artist.name == artist_name))
-        artist = result.scalars().first()
-        if not artist:
-            artist = Artist(name=artist_name)
-            session.add(artist)
-            await session.flush()  # 确保新艺术家 ID 可用
+    # 确保是当前用户的歌单
+    if playlist.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="无权限")
 
-        # 创建歌曲
-        song = Song(
-            title=song_data["title"],
-            artist_id=artist.id,
-        )
-        session.add(song)
-        await session.flush()
+    # 查找歌手
+    artist_name = song_data.get("artist_name")
+    result = await session.execute(select(Artist).where(Artist.name == artist_name))
+    artist = result.scalars().first()
+    if not artist:
+        raise HTTPException(status_code=404, detail="歌手未找到")
+    
+    #查找歌曲
+    result = await session.execute(select(Song).where(Song.artist_id == artist.id))
+    song = result.unique().scalars().first()
+    if not song:
+        raise HTTPException(status_code=404, detail="歌曲未找到")
 
-        # 添加歌曲到歌单
-        playlist.songs.append(song)
-        await session.commit()
-        return {"message": "Song added successfully"}
-    except Exception as e:
-        await session.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+    # 添加歌曲
+    playlist.songs.append(song)
+    # await session.add(new_song)
+    await session.commit()
+    return {"message": "歌曲添加成功"}
+
+# 从歌单中移除歌曲
+@app.delete("/api/playlists/{playlist_id}/songs/{song_id}")
+async def remove_song_from_playlist(
+    playlist_id: int,
+    song_id: int,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    # 查找歌单
+    result = await session.execute(select(Playlist).options(selectinload(Playlist.songs)).where(Playlist.id == playlist_id))
+    playlist = result.scalars().first()
+    if not playlist:
+        raise HTTPException(status_code=404, detail="歌单未找到")
+
+    # 确保是当前用户的歌单
+    if playlist.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="无权限")
+
+    # 查找歌曲并移除
+    result = await session.execute(select(Song).where(Song.id == song_id))
+    song = result.scalars().first()
+    if not song:
+        raise HTTPException(status_code=404, detail="歌曲未找到")
+
+    if song not in playlist.songs:
+        raise HTTPException(status_code=400, detail="歌曲不在歌单中")
+
+    playlist.songs.remove(song)
+    await session.commit()
+    return {"message": "歌曲已移除"}

@@ -11,7 +11,16 @@
         />
         <ul>
             <li v-for="playlist in filteredPlaylists" :key="playlist.id">
-            <strong>{{ playlist.name }}</strong> by {{ playlist.owner }}
+            <div>
+              <strong>{{ playlist.name }}</strong> 
+              <p>by {{ playlist.owner }}</p>
+              <ul>
+              <li v-for="song in playlist.songs" :key="song.id">
+                <p>{{ song.title }}</p>
+              </li>
+              <li v-if="playlist.songs.length === 0">没有歌曲</li>
+              </ul>
+            </div>  
             </li>
         </ul>
 
@@ -20,10 +29,24 @@
         <button @click="createPlaylist">创建歌单</button>
         <ul>
             <li v-for="playlist in userPlaylists" :key="playlist.id">
-            {{ playlist.name }}
+            <div>
+              {{ playlist.name }}
+            <p>            
             <button @click="deletePlaylist(playlist.id)">删除</button>
             <!-- 新增：添加歌曲按钮 -->
-            <button @click="showAddSongForm(playlist.id)">添加歌曲</button>
+            <button @click="showAddSongForm(playlist.id)">添加歌曲</button></p>  
+            <!-- 歌单内歌曲列表 -->
+            
+              <ul>
+              <li v-for="song in playlist.songs" :key="song.id">
+                <p>{{ song.title }}</p>
+                <button @click="removeSongFromPlaylist(playlist.id, song.id)">
+                删除歌曲
+                </button>
+              </li>
+              <li v-if="playlist.songs.length === 0">没有歌曲</li>
+            </ul>
+            </div>
             </li>
         </ul>
         <!-- 添加歌曲表单 -->
@@ -46,7 +69,7 @@
             placeholder="输入创作者名称"
             required
           />
-          <button type="submit">提交</button>
+          <button type="submit" @click="submitAddSong">提交</button>
           <button type="button" @click="cancelAddSong">取消</button>
         </form>
       </div>
@@ -104,6 +127,7 @@
   createPlaylist,
   deletePlaylist,
   addSongToPlaylist, // 新增服务方法
+  removeSongFromPlaylist,
 } from "@/services/playlist_service";
 
   export default {
@@ -236,6 +260,18 @@
         this.newSong = { title: "", artist: "" };
       },
 
+      async removeSongFromPlaylist(playlistId, songId) {
+      try {
+        const token = localStorage.getItem("access_token");
+        await removeSongFromPlaylist(playlistId,songId,token);
+        // this.playlist.songs = this.playlist.songs.filter((song) => song["id"] !== songId); // 更新前端数据
+        await this.loadUserPlaylists();
+        await this.searchPlaylists();
+      } catch (error) {
+        console.error("Failed to remove song:", error);
+      }
+    },
+
     },
     mounted() {
       // 页面加载时获取数据
@@ -331,6 +367,7 @@
     border: none;
     border-radius: 4px;
     cursor: pointer;
+    margin-right: 10px;
   }
   
   button:hover {

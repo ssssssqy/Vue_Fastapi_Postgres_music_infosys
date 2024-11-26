@@ -2,7 +2,7 @@
   <div class="home-container">
     <!-- 歌单栏 -->
     <div class="playlist-section">
-      <h2>guanli歌单</h2>
+      <h2>歌单管理</h2>
       <input
         type="text"
         placeholder="搜索歌单..."
@@ -11,19 +11,29 @@
       />
       <ul>
         <li v-for="playlist in filteredPlaylists" :key="playlist.id">
-          <strong>{{ playlist.name }}</strong> by {{ playlist.owner }}
+          <div>
+          <strong>{{ playlist.name }}</strong> 
+          <p>by {{ playlist.owner }}</p>
           <button @click="deletePlaylist(playlist.id)">删除</button>
+          <ul>
+            <li v-for="song in playlist.songs" :key="song.id">
+            <p>{{ song.title }}</p>
+            
+            </li>
+            <li v-if="playlist.songs.length === 0">没有歌曲</li>
+          </ul>
+          </div>
         </li>
       </ul>
 
-      <h3>我的歌单</h3>
+      <!-- <h3>我的歌单</h3>
       <button @click="createPlaylist">创建歌单</button>
       <ul>
         <li v-for="playlist in userPlaylists" :key="playlist.id">
           {{ playlist.name }}
           <button @click="deletePlaylist(playlist.id)">删除</button>
         </li>
-      </ul>
+      </ul> -->
     </div>
 
     <!-- 歌手栏 -->

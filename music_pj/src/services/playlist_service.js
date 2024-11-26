@@ -64,3 +64,14 @@ export async function addSongToPlaylist(playlistId, songTitle, artistName, token
   );
   return response.data;
 }
+
+export async function removeSongFromPlaylist(playlistId, songId, token) {
+  try {
+    await axios.delete(
+      `${API_BASE_URL}/${playlistId}/songs/${songId}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+  } catch (error) {
+    console.error("删除歌曲失败:", error);
+  }
+}
