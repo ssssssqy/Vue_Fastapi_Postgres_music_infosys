@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const API_BASE_URL = "http://localhost:8000/api/playlists";
+const API_BASE_URL = "http://localhost:8000";
 
 export async function getPlaylists(searchQuery) {
   const params = searchQuery ? { search: searchQuery } : {};
@@ -9,7 +9,7 @@ export async function getPlaylists(searchQuery) {
 }
 
 export async function getUserPlaylists(token) {
-  const response = await axios.get(`${API_BASE_URL}/my`,      {
+  const response = await axios.get(`${API_BASE_URL}/api/playlists/my`,      {
     headers: {
       Authorization: `Bearer ${token}`, // 验证头
       "Content-Type": "application/json", // 确保 Content-Type 正确
@@ -22,7 +22,7 @@ export async function createPlaylist(name, token) {
   try {
     console.log("Sending data:",  name ); // 确认发送数据
     const response = await axios.post(
-      "http://localhost:8000/api/playlists",
+      `${API_BASE_URL}/api/playlists`,
        name , // 确保请求体格式是 { name: "aaaa" }
       {
         headers: {
@@ -41,7 +41,7 @@ export async function createPlaylist(name, token) {
 
 
 export async function deletePlaylist(playlistId, token) {
-  await axios.delete(`${API_BASE_URL}/${playlistId}`, {
+  await axios.delete(`${API_BASE_URL}/api/playlists/${playlistId}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
 }
@@ -49,7 +49,7 @@ export async function deletePlaylist(playlistId, token) {
 
 // 新增：添加歌曲到歌单
 export async function addSongToPlaylist(playlistId, songTitle, artistName, token) {
-  const url = `${API_BASE_URL}/${playlistId}/add_song`;
+  const url = `${API_BASE_URL}/api/playlists/${playlistId}/add_song`;
   const response = await axios.post(
     url,
     {
@@ -68,7 +68,7 @@ export async function addSongToPlaylist(playlistId, songTitle, artistName, token
 export async function removeSongFromPlaylist(playlistId, songId, token) {
   try {
     await axios.delete(
-      `${API_BASE_URL}/${playlistId}/songs/${songId}`,
+      `${API_BASE_URL}/api/playlists/${playlistId}/songs/${songId}`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
   } catch (error) {

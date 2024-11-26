@@ -1,7 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
-# 替换以下连接字符串为你的实际配置
 DATABASE_URL = "postgresql+asyncpg://postgres:123456@localhost:5432/music"
 
 # 创建异步数据库引擎
