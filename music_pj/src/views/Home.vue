@@ -250,9 +250,11 @@
           );
           alert(`歌曲 "${this.newSong.title}" 添加成功！`);
           this.cancelAddSong();
+          await this.loadUserPlaylists();
+          await this.searchPlaylists();
         } catch (error) {
           console.error("添加歌曲失败：", error);
-          alert("添加歌曲失败，请重试！");
+          // alert("添加歌曲失败，请重试！");
         }
       },
       cancelAddSong() {

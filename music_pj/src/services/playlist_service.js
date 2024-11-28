@@ -4,7 +4,7 @@ const API_BASE_URL = "http://localhost:8000";
 
 export async function getPlaylists(searchQuery) {
   const params = searchQuery ? { search: searchQuery } : {};
-  const response = await axios.get(API_BASE_URL, { params });
+  const response = await axios.get(`${API_BASE_URL}/api/playlists`, { params });
   return response.data; // 返回所有歌单数据
 }
 

@@ -112,7 +112,7 @@ class ArtistRequest(BaseModel):
 class SongRequest(BaseModel):
     title: str
     genre: Optional[str] = None
-    artist_id: Optional[int] = None  # 关联的歌手 ID
+    artist: Optional[str] = None  # 关联的歌手 ID
 
     class Config:
         orm_mode = True
@@ -431,14 +431,14 @@ async def add_song(
 
     # 检查关联的歌手是否存在
     artist = None
-    if song_request.artist_id:
-        result = await session.execute(select(Artist).where(Artist.id == song_request.artist_id))
+    if song_request.artist:
+        result = await session.execute(select(Artist).where(Artist.name == song_request.artist))
         artist = result.scalar_one_or_none()
         if not artist:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="歌手不存在")
 
     # 添加歌曲到数据库
-    new_song = Song(title=song_request.title, genre=song_request.genre, artist_id=song_request.artist_id)
+    new_song = Song(title=song_request.title, genre=song_request.genre, artist_id=artist.id)
     session.add(new_song)
     await session.commit()
     await session.refresh(new_song)
@@ -465,11 +465,19 @@ async def update_song(
     song = result.scalar_one_or_none()
     if not song:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="歌曲不存在")
+    
+    # 检查关联的歌手是否存在
+    artist = None
+    if song_request.artist:
+        result = await session.execute(select(Artist).where(Artist.name == song_request.artist))
+        artist = result.scalar_one_or_none()
+        if not artist:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="歌手不存在")
 
     # 更新歌曲信息
     song.title = song_request.title
     song.genre = song_request.genre
-    song.artist_id = song_request.artist_id
+    song.artist_id = artist.id
 
     await session.commit()
     await session.refresh(song)

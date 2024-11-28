@@ -107,9 +107,7 @@
           </div>
         </li>
       </ul>
-    </div>
-
-    <!-- 新增歌曲表单 -->
+      <!-- 新增歌曲表单 -->
     <div v-if="showCreateSongForm" class="form-container">
       <h3>新增歌曲</h3>
       <label>标题:</label>
@@ -134,6 +132,9 @@
       <button @click="updateSong">保存</button>
       <button @click="editSongForm.show = false">取消</button>
     </div>
+    </div>
+
+    
 
     <!-- 用户管理栏 -->
     <div v-if="isAdmin" class="user-management-section">
